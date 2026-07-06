@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(cuid())
+  name      String?
+  email     String    @unique
+  password  String?
+  image     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  websites  Website[]
+  accounts  Account[]
+  sessions  Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+model Website {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  url       String
+  status    String   @default("unknown")
+  interval  Int      @default(5)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checks    WebsiteCheck[]
+  incidents Incident[]
+  ssl       SSL?
+  domain    DomainInfo?
+  notifications Notification[]
+}
+
+model WebsiteCheck {
+  id                String   @id @default(cuid())
+  websiteId         String
+  // Basic
+  status            String
+  statusCode        Int?
+  statusMessage     String?
+  responseTime      Int?
+  errorMessage      String?
+  // Timing
+  dnsTime           Int?
+  tcpTime           Int?
+  tlsTime           Int?
+  ttfb              Int?
+  downloadTime      Int?
+  // HTTP
+  httpVersion       String?
+  method            String?
+  contentType       String?
+  contentLength     Int?
+  contentEncoding   String?
+  charset           String?
+  compression       String?
+  server            String?
+  poweredBy         String?
+  // Redirects
+  redirectCount     Int?
+  redirectChain     String?
+  finalUrl          String?
+  // DNS
+  resolvedIps       String?
+  dnsRecords        String?
+  // Headers
+  requestHeaders    String?
+  responseHeaders   String?
+  securityHeaders   String?
+  cookies           String?
+  corsHeaders       String?
+  // Page
+  pageTitle         String?
+  metaDescription   String?
+  metaKeywords      String?
+  canonicalUrl      String?
+  ogTitle           String?
+  ogDescription     String?
+  ogImage           String?
+  robotsTag         String?
+  faviconUrl        String?
+  hsts              Boolean?
+  xFrameOptions     String?
+  contentSecurityPolicy String?
+  bodyPreview       String?
+  // Network
+  primaryIp         String?
+  ipVersion         String?
+  // When
+  checkedAt         DateTime @default(now())
+  website           Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model Incident {
+  id        String    @id @default(cuid())
+  websiteId String
+  startedAt DateTime
+  endedAt   DateTime?
+  duration  Int?
+  resolved  Boolean   @default(false)
+  website   Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model SSL {
+  id                 String   @id @default(cuid())
+  websiteId          String   @unique
+  // Basic
+  valid              Boolean  @default(true)
+  expiryDate         DateTime
+  issuer             String?
+  subjectName        String?
+  // Dates
+  validFrom          DateTime?
+  validTo            DateTime?
+  // Chain
+  certificateChain   String?
+  issuedBy           String?
+  serialNumber       String?
+  fingerprint        String?
+  fingerprint256     String?
+  // Protocol
+  protocol           String?
+  cipherSuite        String?
+  keyExchange        String?
+  // Key
+  keyAlgorithm       String?
+  keySize            Int?
+  signatureAlgorithm String?
+  // SAN
+  san                String?
+  dnsNames           String?
+  // Flags
+  isCA               Boolean?
+  selfSigned         Boolean?
+  ocspStapled        Boolean?
+  // Revocation
+  crlUrls            String?
+  ocspUrls           String?
+  // Timestamp
+  checkedAt          DateTime @default(now())
+  website            Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model DomainInfo {
+  id            String   @id @default(cuid())
+  websiteId     String   @unique
+  domain        String?
+  registrar     String?
+  organization  String?
+  country       String?
+  creationDate  DateTime?
+  expiryDate    DateTime?
+  updatedDate   DateTime?
+  nameServers   String?
+  dnssec        Boolean?
+  status        String?
+  whoisData     String?
+  checkedAt     DateTime @default(now())
+  website       Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  websiteId String
+  type      String
+  message   String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model NotificationSetting {
+  id      String @id @default(cuid())
+  userId  String
+  type    String
+  enabled Boolean @default(true)
+  value   String?
+  @@unique([userId, type])
+}
