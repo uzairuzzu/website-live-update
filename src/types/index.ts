@@ -2,11 +2,14 @@ export interface DashboardStats {
   totalWebsites: number
   online: number
   offline: number
+  degraded: number
   averageResponseTime: number
   sslExpiring: number
+  weakSsl: number
   uptime: number
   totalDowntime: number
   lastIncident: string | null
+  anomalies: number
 }
 
 export interface WebsiteWithDetails {
@@ -15,6 +18,10 @@ export interface WebsiteWithDetails {
   url: string
   status: string
   interval: number
+  monitorType: string
+  sensitivity: string
+  slaTarget: number
+  consecutiveFailures: number
   responseTime: number | null
   sslStatus: string | null
   sslExpiry: string | null
@@ -39,6 +46,8 @@ export interface DetailedCheck {
   headers: string | null
   bodyPreview: string | null
   errorMessage: string | null
+  isAnomaly: boolean | null
+  anomalyDeviation: number | null
   checkedAt: string
 }
 
@@ -54,6 +63,8 @@ export interface DetailedSSL {
   protocol: string | null
   cipherSuite: string | null
   valid: boolean
+  weakProtocol: boolean | null
+  weakCipher: boolean | null
   checkedAt: string
 }
 
@@ -64,10 +75,82 @@ export interface IncidentData {
   endedAt: string | null
   duration: number | null
   resolved: boolean
+  severity: string
+  rootCause: string | null
+  impactSummary: string | null
+  updates: IncidentUpdate[]
+}
+
+export interface IncidentUpdate {
+  id: string
+  incidentId: string
+  message: string
+  status: string | null
+  createdAt: string
 }
 
 export interface AnalyticsData {
-  responseTimes: { date: string; time: number; website: string }[]
-  uptimeData: { website: string; uptime: number }[]
+  responseTimes: { date: string; time: number; website: string; isAnomaly?: boolean }[]
+  uptimeData: { website: string; uptime: number; slaTarget?: number }[]
   dailyDowntime: { date: string; downtime: number }[]
+  aggregations: { website: string; date: string; avgResponseTime: number; uptimePercent: number; totalChecks: number; incidentCount: number }[]
+}
+
+export interface SLAReport {
+  websiteId: string
+  name: string
+  url: string
+  period: string
+  totalChecks: number
+  onlineChecks: number
+  uptime: number
+  slaTarget: number
+  slaMet: boolean
+  totalDowntime: number
+  incidentCount: number
+  daily: { date: string; uptime: number }[]
+}
+
+export interface DNSPropagationResult {
+  hostname: string
+  records: {
+    resolver: string
+    resolverName: string
+    ips: string[]
+    error: string | null
+    responseTime: number
+  }[]
+  consistent: boolean
+  totalResolvers: number
+  successfulResolvers: number
+}
+
+export interface DomainInfo {
+  domain: string
+  registrar: string | null
+  organization: string | null
+  creationDate: string | null
+  expiryDate: string | null
+  daysUntilExpiry: number | null
+  nameServers: string[]
+  dnssec: boolean | null
+  status: string | null
+  alert: string | null
+}
+
+export interface ExternalCheckResult {
+  status: "online" | "offline" | "unknown"
+  responseTime: number | null
+  statusCode: number | null
+  provider: string
+  message: string
+  checkedAt: Date
+}
+
+export interface ExternalProviderConfig {
+  id: string
+  name: string
+  type: "uptimerobot" | "betterstack" | "freshping"
+  enabled: boolean
+  createdAt: string
 }

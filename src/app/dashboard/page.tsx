@@ -7,30 +7,27 @@ import { UptimeChart } from "@/components/charts/UptimeChart"
 import { DowntimeBarChart } from "@/components/charts/DowntimeBarChart"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import {
-  Globe,
-  CheckCircle,
-  XCircle,
-  ShieldAlert,
-  Gauge,
-  Timer,
-  TrendingUp,
-  AlertTriangle,
+  Globe, CheckCircle, XCircle, ShieldAlert, Gauge, Timer,
+  TrendingUp, AlertTriangle, Zap, Shield, Activity,
 } from "lucide-react"
 
 interface Stats {
   totalWebsites: number
   online: number
   offline: number
+  degraded: number
   averageResponseTime: number
   sslExpiring: number
+  weakSsl: number
   uptime: number
   totalDowntime: number
   lastIncident: string | null
+  anomalies: number
 }
 
 interface AnalyticsData {
-  responseTimes: { date: string; time: number; website: string }[]
-  uptimeData: { website: string; uptime: number }[]
+  responseTimes: { date: string; time: number; website: string; isAnomaly?: boolean }[]
+  uptimeData: { website: string; uptime: number; slaTarget?: number }[]
   dailyDowntime: { date: string; downtime: number }[]
 }
 
@@ -57,7 +54,6 @@ export default function DashboardPage() {
       }
     }
     fetchData()
-
     const interval = setInterval(fetchData, 30000)
     return () => clearInterval(interval)
   }, [])
@@ -115,16 +111,28 @@ export default function DashboardPage() {
           loading={loading}
         />
         <DashboardCard
-          title="Last Incident"
-          value={
-            stats?.lastIncident
-              ? new Date(stats.lastIncident).toLocaleDateString()
-              : "None"
-          }
-          icon={AlertTriangle}
+          title="Anomalies"
+          value={stats?.anomalies ?? "0"}
+          icon={Zap}
           loading={loading}
         />
       </div>
+
+      {(stats?.weakSsl ? stats.weakSsl > 0 : false) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-amber-600">
+              <Shield className="w-4 h-4" />
+              Security Warnings
+            </CardTitle>
+          </CardHeader>
+          <div className="px-5 pb-5">
+            <p className="text-sm text-[var(--muted-foreground)]">
+              {stats?.weakSsl} website(s) have weak SSL protocols or cipher suites detected.
+            </p>
+          </div>
+        </Card>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>

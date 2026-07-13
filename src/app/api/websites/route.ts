@@ -20,16 +20,12 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json()
-    const { name, url, interval } = body
+    const { name, url, interval, monitorType, slaTarget, sensitivity } = body
 
     if (!name || !url) {
-      return NextResponse.json(
-        { error: "Name and URL are required" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Name and URL are required" }, { status: 400 })
     }
 
-    // Normalize URL: add https:// if missing
     const normalizedUrl = url.trim()
     const finalUrl = /^https?:\/\//i.test(normalizedUrl) ? normalizedUrl : "https://" + normalizedUrl
 
@@ -37,15 +33,15 @@ export async function POST(req: Request) {
       name,
       url: finalUrl,
       interval: interval || 5,
+      monitorType: monitorType || "http",
+      slaTarget: slaTarget || 99.9,
+      sensitivity: sensitivity || "normal",
     })
 
     performCheck(website.id)
 
     return NextResponse.json(website, { status: 201 })
   } catch (error) {
-    return NextResponse.json(
-      { error: "Something went wrong" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Something went wrong" }, { status: 500 })
   }
 }

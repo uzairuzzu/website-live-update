@@ -9,21 +9,30 @@ import toast from "react-hot-toast"
 
 type Webhook = { id: string; name: string; url: string; type: string; events: string; enabled: boolean }
 type Tag = { id: string; name: string; color: string }
+type Provider = { id: string; name: string; type: string; enabled: boolean; createdAt: string }
+
+const PROVIDER_LABELS: Record<string, string> = { uptimerobot: "UptimeRobot", betterstack: "Better Stack", freshping: "Freshping" }
+const PROVIDER_URLS: Record<string, string> = { uptimerobot: "https://uptimerobot.com/signUp", betterstack: "https://betterstack.com/pricing", freshping: "https://freshping.io/signup" }
+const PROVIDER_KEY_URLS: Record<string, string> = { uptimerobot: "https://uptimerobot.com/dashboard#api-key", betterstack: "https://betterstack.com/dashboard/api", freshping: "https://dash.freshping.io/settings" }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState("webhooks")
+  const [tab, setTab] = useState("external")
   const [webhooks, setWebhooks] = useState<Webhook[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  const [providers, setProviders] = useState<Provider[]>([])
   const [showWebhookModal, setShowWebhookModal] = useState(false)
   const [showTagModal, setShowTagModal] = useState(false)
+  const [showProviderModal, setShowProviderModal] = useState(false)
   const [whForm, setWhForm] = useState({ websiteId: "", name: "", url: "", type: "discord", events: "down,up" })
   const [tagForm, setTagForm] = useState({ name: "", color: "#6366f1" })
+  const [provForm, setProvForm] = useState({ name: "", type: "uptimerobot", apiKey: "" })
   const [websites, setWebsites] = useState<{ id: string; name: string; url: string }[]>([])
   const [notifForm, setNotifForm] = useState({ email: "", telegram: "", discord: "", slack: "" })
 
   useEffect(() => {
     fetch("/api/websites").then(r => r.json()).then(setWebsites)
     fetch("/api/tags").then(r => r.json()).then(setTags)
+    fetch("/api/external-providers").then(r => r.json()).then(setProviders)
   }, [])
 
   function loadWebhooks(websiteId: string) {
@@ -67,6 +76,35 @@ export default function SettingsPage() {
     if (res.ok) { toast.success("Tag deleted"); fetch("/api/tags").then(r => r.json()).then(setTags) }
   }
 
+  async function addProvider() {
+    const res = await fetch("/api/external-providers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(provForm),
+    })
+    if (res.ok) {
+      toast.success(`${PROVIDER_LABELS[provForm.type] || provForm.type} added`)
+      setShowProviderModal(false)
+      setProvForm({ name: "", type: "uptimerobot", apiKey: "" })
+      fetch("/api/external-providers").then(r => r.json()).then(setProviders)
+    } else {
+      const err = await res.json().catch(() => ({}))
+      toast.error(err.error || "Failed to add provider")
+    }
+  }
+
+  async function toggleProvider(p: Provider) {
+    const res = await fetch(`/api/external-providers/${p.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !p.enabled }),
+    })
+    if (res.ok) fetch("/api/external-providers").then(r => r.json()).then(setProviders)
+  }
+
+  async function deleteProvider(id: string) {
+    const res = await fetch(`/api/external-providers/${id}`, { method: "DELETE" })
+    if (res.ok) { toast.success("Provider deleted"); fetch("/api/external-providers").then(r => r.json()).then(setProviders) }
+  }
+
   function handleSaveNotif() { toast.success("Notification settings saved!") }
 
   return (
@@ -76,15 +114,16 @@ export default function SettingsPage() {
         <p className="text-sm text-[var(--muted-foreground)]">Configure your monitoring preferences</p>
       </div>
 
-      <div className="flex gap-1 border-b border-[var(--border)] mb-6">
+      <div className="flex gap-1 border-b border-[var(--border)] mb-6 overflow-x-auto">
         {[
+          { id: "external", label: "External Monitors" },
           { id: "webhooks", label: "Webhooks" },
           { id: "tags", label: "Tags" },
           { id: "notifications", label: "Notifications" },
         ].map(t => (
           <button key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[1px] ${
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[1px] whitespace-nowrap ${
               tab === t.id ? "border-[var(--primary)] text-[var(--primary)]" : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             }`}
           >
@@ -92,6 +131,55 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {tab === "external" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>External Monitoring Providers</CardTitle>
+                <p className="text-xs text-[var(--muted-foreground)] mt-1">When direct checks fail (e.g. site blocks cloud IPs), we verify status through these providers</p>
+              </div>
+              <Button onClick={() => setShowProviderModal(true)}>Add Provider</Button>
+            </div>
+          </CardHeader>
+          <div className="space-y-4">
+            {providers.length === 0 && (
+              <div className="p-4 rounded-lg border border-dashed border-[var(--border)] text-center">
+                <p className="text-sm text-[var(--muted-foreground)] mb-3">No external providers configured</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Add a free UptimeRobot account to automatically verify sites that block direct connections</p>
+              </div>
+            )}
+            {providers.map(p => (
+              <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)]">
+                <div className="flex items-center gap-3">
+                  <Badge variant="secondary">{PROVIDER_LABELS[p.type] || p.type}</Badge>
+                  <div>
+                    <p className="text-sm font-medium">{p.name}</p>
+                    <p className="text-xs text-[var(--muted-foreground)]">Added {new Date(p.createdAt).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => toggleProvider(p)}
+                    className={`px-2 py-1 text-xs rounded ${p.enabled ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" : "bg-gray-100 text-gray-500 dark:bg-gray-800"}`}
+                  >
+                    {p.enabled ? "Enabled" : "Disabled"}
+                  </button>
+                  <button onClick={() => deleteProvider(p.id)} className="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                </div>
+              </div>
+            ))}
+            {providers.length > 0 && (
+              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
+                <p className="text-xs text-blue-700 dark:text-blue-300">
+                  External checks run automatically when direct HTTP checks fail with connection errors (ETIMEDOUT, ECONNREFUSED, etc).
+                  If the provider also reports the site as down, it&apos;s confirmed offline.
+                </p>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {tab === "webhooks" && (
         <Card>
@@ -208,6 +296,46 @@ export default function SettingsPage() {
             <input type="color" value={tagForm.color} onChange={e => setTagForm({ ...tagForm, color: e.target.value })} className="w-full h-10 rounded-lg border border-[var(--border)] cursor-pointer" />
           </div>
           <Button onClick={addTag} className="w-full">Create Tag</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={showProviderModal} onClose={() => setShowProviderModal(false)} title="Add External Monitor">
+        <div className="space-y-4">
+          <Input label="Name" placeholder="My UptimeRobot" value={provForm.name} onChange={e => setProvForm({ ...provForm, name: e.target.value })} />
+          <div>
+            <label className="block text-sm font-medium mb-1">Provider</label>
+            <select className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm" value={provForm.type} onChange={e => setProvForm({ ...provForm, type: e.target.value })}>
+              <option value="uptimerobot">UptimeRobot (Free — 50 monitors)</option>
+              <option value="betterstack">Better Stack (Free — 5 monitors)</option>
+              <option value="freshping">Freshping (Free — 50 checks)</option>
+            </select>
+          </div>
+          <Input label="API Key" placeholder="Your API key" type="password" value={provForm.apiKey} onChange={e => setProvForm({ ...provForm, apiKey: e.target.value })} />
+          <div className="p-3 rounded-lg bg-[var(--secondary)] text-xs text-[var(--muted-foreground)] space-y-1">
+            <p className="font-medium text-[var(--foreground)]">How to get your API key:</p>
+            {provForm.type === "uptimerobot" && (
+              <>
+                <p>1. Sign up free at <a href={PROVIDER_URLS.uptimerobot} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] underline">uptimerobot.com</a></p>
+                <p>2. Go to <a href={PROVIDER_KEY_URLS.uptimerobot} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] underline">My Settings &gt; API</a></p>
+                <p>3. Copy your &quot;Main API Key&quot;</p>
+              </>
+            )}
+            {provForm.type === "betterstack" && (
+              <>
+                <p>1. Sign up at <a href={PROVIDER_URLS.betterstack} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] underline">betterstack.com</a></p>
+                <p>2. Go to <a href={PROVIDER_KEY_URLS.betterstack} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] underline">Settings &gt; API</a></p>
+                <p>3. Copy your API token</p>
+              </>
+            )}
+            {provForm.type === "freshping" && (
+              <>
+                <p>1. Sign up at <a href={PROVIDER_URLS.freshping} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] underline">freshping.io</a></p>
+                <p>2. Go to <a href={PROVIDER_KEY_URLS.freshping} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] underline">Settings</a></p>
+                <p>3. Copy your API key</p>
+              </>
+            )}
+          </div>
+          <Button onClick={addProvider} className="w-full" disabled={!provForm.name || !provForm.apiKey}>Add Provider</Button>
         </div>
       </Dialog>
     </div>

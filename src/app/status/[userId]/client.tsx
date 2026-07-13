@@ -2,12 +2,14 @@
 import { useEffect, useState } from "react"
 
 type WebsiteData = {
-  id: string; name: string; url: string; status: string
+  id: string; name: string; url: string; status: string; monitorType: string
   tags: { name: string; color: string }[]
   lastCheck: { statusCode: number | null; responseTime: number | null; checkedAt: string } | null
-  activeIncidents: { id: string; startedAt: string }[]
+  activeIncidents: { id: string; startedAt: string; severity: string }[]
+  regionChecks: { region: string; status: string; responseTime: number | null }[]
   maintenance: string | null
   uptime24h: number
+  ssl: { valid: boolean; expiryDate: string } | null
 }
 
 export default function StatusPageClient({ userName, userImage, websites: initial }: {
@@ -34,11 +36,8 @@ export default function StatusPageClient({ userName, userImage, websites: initia
   return (
     <div className="min-h-screen bg-[var(--background)]">
       <div className="max-w-3xl mx-auto px-4 py-12">
-        {/* Header */}
         <div className="text-center mb-10">
-          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">
-            {userName} Status
-          </h1>
+          <h1 className="text-3xl font-bold text-[var(--foreground)] mb-2">{userName} Status</h1>
           <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
             allOnline ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
           }`}>
@@ -47,7 +46,6 @@ export default function StatusPageClient({ userName, userImage, websites: initia
           </div>
         </div>
 
-        {/* Services */}
         <div className="space-y-4">
           {websites.map(w => {
             const isOpen = collapsed[w.id] !== false
@@ -58,15 +56,13 @@ export default function StatusPageClient({ userName, userImage, websites: initia
             return (
               <div key={w.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
                 <button onClick={() => setCollapsed({ ...collapsed, [w.id]: !isOpen })}
-                  className="w-full flex items-center justify-between p-4 hover:bg-[var(--accent)]/50 transition-colors"
-                >
+                  className="w-full flex items-center justify-between p-4 hover:bg-[var(--accent)]/50 transition-colors">
                   <div className="flex items-center gap-3">
-                    <span className={`w-2.5 h-2.5 rounded-full ${
-                      w.maintenance ? "bg-yellow-400" : w.status === "online" ? "bg-green-500" : "bg-red-500"
-                    }`} />
+                    <span className={`w-2.5 h-2.5 rounded-full ${w.maintenance ? "bg-yellow-400" : w.status === "online" ? "bg-green-500" : "bg-red-500"}`} />
                     <div className="text-left">
                       <span className="font-medium text-[var(--foreground)]">{w.name}</span>
                       <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--secondary)] text-[var(--muted-foreground)]">{w.monitorType?.toUpperCase()}</span>
                         {w.tags.map(t => (
                           <span key={t.name} className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: t.color + "20", color: t.color }}>{t.name}</span>
                         ))}
@@ -112,13 +108,42 @@ export default function StatusPageClient({ userName, userImage, websites: initia
                         </>
                       )}
                     </div>
+
+                    {/* Region Status */}
+                    {w.regionChecks.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs font-medium text-[var(--muted-foreground)] mb-1">Region Status</p>
+                        <div className="flex flex-wrap gap-2">
+                          {w.regionChecks.map((r, i) => (
+                            <span key={i} className="flex items-center gap-1 text-xs">
+                              <span className={`w-1.5 h-1.5 rounded-full ${r.status === "online" ? "bg-green-500" : "bg-red-500"}`} />
+                              <span className="text-[var(--muted-foreground)]">{r.region}</span>
+                              {r.responseTime && <span className="font-mono text-[var(--foreground)]">{r.responseTime}ms</span>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SSL Info */}
+                    {w.ssl && (
+                      <div className="mt-2">
+                        <span className={`text-xs ${w.ssl.valid ? "text-green-600" : "text-red-600"}`}>
+                          SSL: {w.ssl.valid ? "Valid" : "Invalid"}
+                        </span>
+                      </div>
+                    )}
+
                     {w.activeIncidents.length > 0 && (
                       <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800">
                         <p className="text-xs font-medium text-red-700 dark:text-red-300 mb-1">Active Incidents</p>
                         {w.activeIncidents.map(i => (
-                          <p key={i.id} className="text-xs text-red-600 dark:text-red-400">
-                            Since {new Date(i.startedAt).toLocaleString()}
-                          </p>
+                          <div key={i.id} className="text-xs text-red-600 dark:text-red-400">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${
+                              i.severity === "critical" ? "bg-red-500" : i.severity === "major" ? "bg-orange-500" : "bg-yellow-500"
+                            }`} />
+                            Since {new Date(i.startedAt).toLocaleString()} ({i.severity})
+                          </div>
                         ))}
                       </div>
                     )}

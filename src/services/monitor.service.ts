@@ -13,6 +13,7 @@ export async function getIncidents(websiteId: string) {
     where: { websiteId },
     orderBy: { startedAt: "desc" },
     take: 20,
+    include: { updates: { orderBy: { createdAt: "desc" } } },
   })
 }
 
@@ -24,14 +25,9 @@ export async function getAnalytics(userId: string) {
   const websites = await prisma.website.findMany({
     where: { userId },
     include: {
-      checks: {
-        orderBy: { checkedAt: "desc" },
-        take: 100,
-      },
-      incidents: {
-        orderBy: { startedAt: "desc" },
-        take: 50,
-      },
+      checks: { orderBy: { checkedAt: "desc" }, take: 100 },
+      incidents: { orderBy: { startedAt: "desc" }, take: 50 },
+      aggregations: { orderBy: { date: "desc" }, take: 30 },
     },
   })
 
@@ -42,6 +38,7 @@ export async function getAnalytics(userId: string) {
         date: c.checkedAt.toISOString(),
         time: c.responseTime!,
         website: w.name,
+        isAnomaly: c.isAnomaly || false,
       }))
   )
 
@@ -51,6 +48,7 @@ export async function getAnalytics(userId: string) {
     return {
       website: w.name,
       uptime: total > 0 ? Math.round((online / total) * 10000) / 100 : 100,
+      slaTarget: w.slaTarget,
     }
   })
 
@@ -58,7 +56,18 @@ export async function getAnalytics(userId: string) {
     websites.flatMap((w) => w.incidents)
   )
 
-  return { responseTimes, uptimeData, dailyDowntime }
+  const aggregations = websites.flatMap((w) =>
+    w.aggregations.map(a => ({
+      website: w.name,
+      date: a.date.toISOString(),
+      avgResponseTime: a.avgResponseTime,
+      uptimePercent: a.uptimePercent,
+      totalChecks: a.totalChecks,
+      incidentCount: a.incidentCount,
+    }))
+  )
+
+  return { responseTimes, uptimeData, dailyDowntime, aggregations }
 }
 
 function aggregateDailyDowntime(
@@ -81,26 +90,21 @@ export async function getDashboardStats(userId: string) {
   const websites = await prisma.website.findMany({
     where: { userId },
     include: {
-      checks: {
-        orderBy: { checkedAt: "desc" },
-        take: 10,
-      },
+      checks: { orderBy: { checkedAt: "desc" }, take: 10 },
       ssl: true,
-      incidents: {
-        where: { resolved: false },
-      },
+      incidents: { where: { resolved: false } },
     },
   })
 
   const totalWebsites = websites.length
   const online = websites.filter((w) => w.status === "online").length
   const offline = websites.filter((w) => w.status === "offline").length
+  const degraded = websites.filter((w) => w.status === "degraded").length
 
   const allChecks = websites.flatMap((w) => w.checks)
   const avgResponse = allChecks.length
     ? Math.round(
-        allChecks.reduce((sum, c) => sum + (c.responseTime || 0), 0) /
-          allChecks.length
+        allChecks.reduce((sum, c) => sum + (c.responseTime || 0), 0) / allChecks.length
       )
     : 0
 
@@ -112,34 +116,31 @@ export async function getDashboardStats(userId: string) {
     return daysLeft < 30
   }).length
 
+  const weakSsl = websites.filter((w) => w.ssl?.weakProtocol || w.ssl?.weakCipher).length
+
   const totalChecks = websites.flatMap((w) => w.checks)
   const uptime =
     totalChecks.length > 0
       ? Math.round(
-          (totalChecks.filter((c) => c.status === "online").length /
-            totalChecks.length) *
-            10000
+          (totalChecks.filter((c) => c.status === "online").length / totalChecks.length) * 10000
         ) / 100
       : 100
 
   const totalDowntime = websites
-    .flatMap((w) =>
-      w.incidents.filter((i) => i.duration != null).map((i) => i.duration!)
-    )
+    .flatMap((w) => w.incidents.filter((i) => i.duration != null).map((i) => i.duration!))
     .reduce((a, b) => a + b, 0)
 
   const lastIncident = websites
     .flatMap((w) => w.incidents)
     .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0]
 
+  const anomalies = allChecks.filter(c => c.isAnomaly).length
+
   return {
-    totalWebsites,
-    online,
-    offline,
-    averageResponseTime: avgResponse,
-    sslExpiring,
-    uptime,
-    totalDowntime,
+    totalWebsites, online, offline, degraded,
+    averageResponseTime: avgResponse, sslExpiring, weakSsl,
+    uptime, totalDowntime,
     lastIncident: lastIncident?.startedAt.toISOString() || null,
+    anomalies,
   }
 }

@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react"
 export function MonitorProvider({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
     if (!session?.user?.id) return
@@ -34,11 +35,29 @@ export function MonitorProvider({ children }: { children: React.ReactNode }) {
     }
 
     runChecks()
-
     intervalRef.current = setInterval(runChecks, 60000)
+
+    try {
+      const es = new EventSource("/api/events")
+      eventSourceRef.current = es
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === "status_change") {
+            runChecks()
+          }
+        } catch {}
+      }
+
+      es.onerror = () => {
+        es.close()
+      }
+    } catch {}
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
+      if (eventSourceRef.current) eventSourceRef.current.close()
     }
   }, [session?.user?.id])
 

@@ -14,6 +14,10 @@ interface Website {
   url: string
   status: string
   interval: number
+  monitorType: string
+  sensitivity: string
+  slaTarget: number
+  consecutiveFailures: number
   checks: { statusCode: number | null; responseTime: number | null; checkedAt: string }[]
   ssl: { valid: boolean; expiryDate: string } | null
   incidents: { id: string }[]
@@ -24,11 +28,12 @@ export default function WebsitesPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ name: "", url: "", interval: 5 })
+  const [form, setForm] = useState({
+    name: "", url: "", interval: 5,
+    monitorType: "http", slaTarget: 99.9, sensitivity: "normal",
+  })
 
-  useEffect(() => {
-    fetchWebsites()
-  }, [])
+  useEffect(() => { fetchWebsites() }, [])
 
   async function fetchWebsites() {
     try {
@@ -57,7 +62,7 @@ export default function WebsitesPage() {
       }
       toast.success("Website added!")
       setShowAdd(false)
-      setForm({ name: "", url: "", interval: 5 })
+      setForm({ name: "", url: "", interval: 5, monitorType: "http", slaTarget: 99.9, sensitivity: "normal" })
       fetchWebsites()
     } catch {
       toast.error("Something went wrong")
@@ -76,8 +81,7 @@ export default function WebsitesPage() {
   }
 
   const filtered = websites.filter(
-    (w) =>
-      w.name.toLowerCase().includes(search.toLowerCase()) ||
+    (w) => w.name.toLowerCase().includes(search.toLowerCase()) ||
       w.url.toLowerCase().includes(search.toLowerCase())
   )
 
@@ -89,9 +93,7 @@ export default function WebsitesPage() {
     responseTime: w.checks[0]?.responseTime ?? null,
     sslStatus: w.ssl
       ? w.ssl.valid
-        ? new Date(w.ssl.expiryDate).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000
-          ? "expiring"
-          : "valid"
+        ? new Date(w.ssl.expiryDate).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000 ? "expiring" : "valid"
         : "invalid"
       : null,
     lastChecked: w.checks[0]?.checkedAt ?? null,
@@ -102,13 +104,10 @@ export default function WebsitesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Websites</h1>
-          <p className="text-sm text-[var(--muted-foreground)]">
-            Manage your monitored websites
-          </p>
+          <p className="text-sm text-[var(--muted-foreground)]">Manage your monitored websites</p>
         </div>
         <Button onClick={() => setShowAdd(true)}>
-          <Plus className="w-4 h-4 mr-1.5" />
-          Add Website
+          <Plus className="w-4 h-4 mr-1.5" />Add Website
         </Button>
       </div>
 
@@ -122,33 +121,44 @@ export default function WebsitesPage() {
           </CardHeader>
           <form onSubmit={handleAdd} className="p-5 pt-0 space-y-4">
             <div className="grid md:grid-cols-3 gap-4">
-              <Input
-                id="name"
-                label="Website Name"
-                placeholder="My Portfolio"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-              <Input
-                id="url"
-                label="Website URL"
-                type="url"
-                placeholder="https://example.com"
-                value={form.url}
-                onChange={(e) => setForm({ ...form, url: e.target.value })}
-                required
-              />
-              <Input
-                id="interval"
-                label="Check Interval (minutes)"
-                type="number"
-                min={1}
-                value={form.interval}
-                onChange={(e) =>
-                  setForm({ ...form, interval: parseInt(e.target.value) || 5 })
-                }
-              />
+              <Input id="name" label="Website Name" placeholder="My Portfolio"
+                value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+              <Input id="url" label="Website URL" type="url" placeholder="https://example.com"
+                value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required />
+              <Input id="interval" label="Check Interval (minutes)" type="number" min={1}
+                value={form.interval} onChange={(e) => setForm({ ...form, interval: parseInt(e.target.value) || 5 })} />
+            </div>
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium mb-1 text-[var(--foreground)]">Monitor Type</label>
+                <select value={form.monitorType} onChange={e => setForm({ ...form, monitorType: e.target.value })}
+                  className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] px-3 py-2 text-sm">
+                  <option value="http">HTTP/HTTPS</option>
+                  <option value="tcp">TCP Port</option>
+                  <option value="ping">Ping (DNS)</option>
+                  <option value="dns">DNS Lookup</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1 text-[var(--foreground)]">SLA Target (%)</label>
+                <select value={form.slaTarget} onChange={e => setForm({ ...form, slaTarget: parseFloat(e.target.value) })}
+                  className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] px-3 py-2 text-sm">
+                  <option value={99}>99%</option>
+                  <option value={99.5}>99.5%</option>
+                  <option value={99.9}>99.9%</option>
+                  <option value={99.95}>99.95%</option>
+                  <option value={99.99}>99.99%</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1 text-[var(--foreground)]">Alert Sensitivity</label>
+                <select value={form.sensitivity} onChange={e => setForm({ ...form, sensitivity: e.target.value })}
+                  className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] px-3 py-2 text-sm">
+                  <option value="strict">Strict (1 failure)</option>
+                  <option value="normal">Normal (2 failures)</option>
+                  <option value="relaxed">Relaxed (3 failures)</option>
+                </select>
+              </div>
             </div>
             <Button type="submit">Save Website</Button>
           </form>
@@ -168,11 +178,7 @@ export default function WebsitesPage() {
             />
           </div>
         </CardHeader>
-        <WebsitesTable
-          websites={tableData}
-          loading={loading}
-          onDelete={handleDelete}
-        />
+        <WebsitesTable websites={tableData} loading={loading} onDelete={handleDelete} />
       </Card>
     </div>
   )

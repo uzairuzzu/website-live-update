@@ -15,9 +15,10 @@ model User {
   image     String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  websites  Website[]
-  accounts  Account[]
-  sessions  Session[]
+  websites          Website[]
+  accounts          Account[]
+  sessions          Session[]
+  externalProviders ExternalProvider[]
 }
 
 model Account {
@@ -53,43 +54,47 @@ model VerificationToken {
 }
 
 model Website {
-  id            String          @id @default(cuid())
-  userId        String
-  name          String
-  url           String
-  status        String          @default("unknown")
-  interval      Int             @default(5)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  checks        WebsiteCheck[]
-  incidents     Incident[]
-  ssl           SSL?
-  domain        DomainInfo?
-  notifications Notification[]
-  webhooks      Webhook[]
-  maintenances  MaintenanceWindow[]
-  keywords      Keyword[]
-  tags          WebsiteTag[]
-  contentHash   String?
+  id                 String              @id @default(cuid())
+  userId             String
+  name               String
+  url                String
+  status             String              @default("unknown")
+  interval           Int                 @default(5)
+  monitorType        String              @default("http")
+  consecutiveFailures Int                @default(0)
+  sensitivity        String              @default("normal")
+  slaTarget          Float               @default(99.9)
+  contentHash        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checks             WebsiteCheck[]
+  regionChecks       CheckRegion[]
+  incidents          Incident[]
+  ssl                SSL?
+  domain             DomainInfo?
+  notifications      Notification[]
+  webhooks           Webhook[]
+  maintenances       MaintenanceWindow[]
+  keywords           Keyword[]
+  tags               WebsiteTag[]
+  aggregations       DailyAggregation[]
+  baseline           ResponseTimeBaseline?
 }
 
 model WebsiteCheck {
   id                String   @id @default(cuid())
   websiteId         String
-  // Basic
   status            String
   statusCode        Int?
   statusMessage     String?
   responseTime      Int?
   errorMessage      String?
-  // Timing
   dnsTime           Int?
   tcpTime           Int?
   tlsTime           Int?
   ttfb              Int?
   downloadTime      Int?
-  // HTTP
   httpVersion       String?
   method            String?
   contentType       String?
@@ -99,20 +104,16 @@ model WebsiteCheck {
   compression       String?
   server            String?
   poweredBy         String?
-  // Redirects
   redirectCount     Int?
   redirectChain     String?
   finalUrl          String?
-  // DNS
   resolvedIps       String?
   dnsRecords        String?
-  // Headers
   requestHeaders    String?
   responseHeaders   String?
   securityHeaders   String?
   cookies           String?
   corsHeaders       String?
-  // Page
   pageTitle         String?
   metaDescription   String?
   metaKeywords      String?
@@ -126,65 +127,83 @@ model WebsiteCheck {
   xFrameOptions     String?
   contentSecurityPolicy String?
   bodyPreview       String?
-  // Content diff
   contentHash       String?
   contentChanged    Boolean?
-  // Network
   primaryIp         String?
   ipVersion         String?
-  // When
+  isAnomaly         Boolean?
+  anomalyDeviation  Float?
   checkedAt         DateTime @default(now())
   website           Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
 }
 
+model CheckRegion {
+  id          String   @id @default(cuid())
+  websiteId   String
+  region      String
+  status      String
+  statusCode  Int?
+  responseTime Int?
+  errorMessage String?
+  resolvedIp  String?
+  checkedAt   DateTime @default(now())
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
 model Incident {
-  id        String    @id @default(cuid())
-  websiteId String
-  startedAt DateTime
-  endedAt   DateTime?
-  duration  Int?
-  resolved  Boolean   @default(false)
-  website   Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  id          String            @id @default(cuid())
+  websiteId   String
+  startedAt   DateTime
+  endedAt     DateTime?
+  duration    Int?
+  resolved    Boolean           @default(false)
+  severity    String            @default("major")
+  rootCause   String?
+  impactSummary String?
+  website     Website           @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  updates     IncidentUpdate[]
+}
+
+model IncidentUpdate {
+  id          String   @id @default(cuid())
+  incidentId  String
+  message     String
+  status      String?
+  createdAt   DateTime @default(now())
+  incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 }
 
 model SSL {
   id                 String   @id @default(cuid())
   websiteId          String   @unique
-  // Basic
   valid              Boolean  @default(true)
   expiryDate         DateTime
   issuer             String?
   subjectName        String?
-  // Dates
   validFrom          DateTime?
   validTo            DateTime?
-  // Chain
   certificateChain   String?
   issuedBy           String?
   serialNumber       String?
   fingerprint        String?
   fingerprint256     String?
-  // Protocol
   protocol           String?
   cipherSuite        String?
   keyExchange        String?
-  // Key
   keyAlgorithm       String?
   keySize            Int?
   signatureAlgorithm String?
-  // SAN
   san                String?
   dnsNames           String?
-  // Flags
   isCA               Boolean?
   selfSigned         Boolean?
   ocspStapled        Boolean?
-  // Revocation
   crlUrls            String?
   ocspUrls           String?
-  // Timestamp
-  checkedAt          DateTime @default(now())
-  website            Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  weakProtocol       Boolean?  @default(false)
+  weakCipher         Boolean?  @default(false)
+  checkedAt          DateTime  @default(now())
+  website            Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
 }
 
 model DomainInfo {
@@ -210,6 +229,7 @@ model Notification {
   websiteId String
   type      String
   message   String?
+  severity  String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
   website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
@@ -230,8 +250,8 @@ model Webhook {
   userId    String
   name      String   @default("Default")
   url       String
-  type      String   @default("generic") // discord, slack, telegram, generic
-  events    String   @default("down,up") // comma-separated
+  type      String   @default("generic")
+  events    String   @default("down,up")
   enabled   Boolean  @default(true)
   secret    String?
   createdAt DateTime @default(now())
@@ -271,10 +291,48 @@ model Keyword {
   id          String   @id @default(cuid())
   websiteId   String
   keyword     String
-  mode        String   @default("present") // present | absent
+  mode        String   @default("present")
   enabled     Boolean  @default(true)
   lastMatch   Boolean?
   lastChecked DateTime?
   createdAt   DateTime @default(now())
   website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model ResponseTimeBaseline {
+  id              String   @id @default(cuid())
+  websiteId       String   @unique
+  mean            Float    @default(0)
+  stdDeviation    Float    @default(0)
+  sampleCount     Int      @default(0)
+  lastCalculated  DateTime @default(now())
+  website         Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model DailyAggregation {
+  id              String   @id @default(cuid())
+  websiteId       String
+  date            DateTime
+  totalChecks     Int      @default(0)
+  onlineChecks    Int      @default(0)
+  avgResponseTime Float    @default(0)
+  minResponseTime Int      @default(0)
+  maxResponseTime Int      @default(0)
+  uptimePercent   Float    @default(100)
+  downtimeSeconds Int      @default(0)
+  incidentCount   Int      @default(0)
+  website         Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  @@unique([websiteId, date])
+}
+
+model ExternalProvider {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  type      String
+  apiKey    String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

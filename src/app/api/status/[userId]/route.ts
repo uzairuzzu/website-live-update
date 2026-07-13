@@ -13,6 +13,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ userId: 
       tags: { include: { tag: true } },
       checks: { orderBy: { checkedAt: "desc" }, take: 1 },
       incidents: { where: { resolved: false }, orderBy: { startedAt: "desc" }, take: 5 },
+      regionChecks: { orderBy: { checkedAt: "desc" }, take: 3 },
+      ssl: { select: { valid: true, expiryDate: true, weakProtocol: true, weakCipher: true } },
     },
   })
 
@@ -20,10 +22,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ userId: 
     const maintenance = await getActiveMaintenanceMessage(w.id)
     return {
       id: w.id, name: w.name, url: w.url, status: w.status,
+      monitorType: w.monitorType,
       tags: w.tags.map(wt => ({ name: wt.tag.name, color: wt.tag.color })),
       lastCheck: w.checks[0] || null,
       activeIncidents: w.incidents,
+      regionChecks: w.regionChecks,
       maintenance,
+      ssl: w.ssl,
     }
   }))
 

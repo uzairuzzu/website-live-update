@@ -12,8 +12,12 @@ export async function POST(req: Request) {
   const { websiteId } = await req.json()
 
   if (websiteId) {
+    const website = await prisma.website.findFirst({ where: { id: websiteId, userId: session.user.id } })
+    if (!website) return NextResponse.json({ error: "Not found" }, { status: 404 })
     const check = await performCheck(websiteId)
-    await checkSSL(websiteId).catch(() => {})
+    if (website.monitorType === "http") {
+      await checkSSL(websiteId).catch(() => {})
+    }
     return NextResponse.json({ checked: true, result: check })
   }
 
@@ -24,7 +28,9 @@ export async function POST(req: Request) {
   const results = []
   for (const website of websites) {
     const check = await performCheck(website.id)
-    await checkSSL(website.id).catch(() => {})
+    if (website.monitorType === "http") {
+      await checkSSL(website.id).catch(() => {})
+    }
     results.push({ id: website.id, name: website.name, result: check })
   }
 

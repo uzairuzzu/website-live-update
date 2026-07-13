@@ -13,12 +13,14 @@ export default async function StatusPage({ params }: { params: Promise<{ userId:
       tags: { include: { tag: true } },
       checks: { orderBy: { checkedAt: "desc" }, take: 1 },
       incidents: { where: { resolved: false }, orderBy: { startedAt: "desc" }, take: 5 },
+      regionChecks: { orderBy: { checkedAt: "desc" }, take: 3 },
+      ssl: { select: { valid: true, expiryDate: true } },
     },
   })
 
   const data = await Promise.all(websites.map(async (w) => {
     const maintenance = await getActiveMaintenanceMessage(w.id)
-    const lastDay = new Date(Date.now() - 86400000)
+    const lastDay = new Date(new Date().getTime() - 86400000)
     const recentChecks = await prisma.websiteCheck.findMany({
       where: { websiteId: w.id, checkedAt: { gte: lastDay } },
       orderBy: { checkedAt: "asc" },
@@ -29,6 +31,7 @@ export default async function StatusPage({ params }: { params: Promise<{ userId:
 
     return {
       id: w.id, name: w.name, url: w.url, status: w.status,
+      monitorType: w.monitorType,
       tags: w.tags.map(wt => ({ name: wt.tag.name, color: wt.tag.color })),
       lastCheck: w.checks[0] ? {
         statusCode: w.checks[0].statusCode,
@@ -36,10 +39,14 @@ export default async function StatusPage({ params }: { params: Promise<{ userId:
         checkedAt: w.checks[0].checkedAt.toISOString(),
       } : null,
       activeIncidents: w.incidents.map(i => ({
-        id: i.id, startedAt: i.startedAt.toISOString(),
+        id: i.id, startedAt: i.startedAt.toISOString(), severity: i.severity,
+      })),
+      regionChecks: w.regionChecks.map(r => ({
+        region: r.region, status: r.status, responseTime: r.responseTime,
       })),
       maintenance,
       uptime24h: uptime,
+      ssl: w.ssl ? { valid: w.ssl.valid, expiryDate: w.ssl.expiryDate.toISOString() } : null,
     }
   }))
 
