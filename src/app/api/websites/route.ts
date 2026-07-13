@@ -29,9 +29,13 @@ export async function POST(req: Request) {
       )
     }
 
+    // Normalize URL: add https:// if missing
+    const normalizedUrl = url.trim()
+    const finalUrl = /^https?:\/\//i.test(normalizedUrl) ? normalizedUrl : "https://" + normalizedUrl
+
     const website = await createWebsite(session.user.id, {
       name,
-      url,
+      url: finalUrl,
       interval: interval || 5,
     })
 

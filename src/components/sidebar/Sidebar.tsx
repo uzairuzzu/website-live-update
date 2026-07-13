@@ -12,6 +12,10 @@ import {
   Settings,
   X,
   Activity,
+  Tags,
+  Webhook,
+  ShieldCheck,
+  Search,
 } from "lucide-react"
 
 const routes = [
@@ -21,6 +25,8 @@ const routes = [
   { label: "Reports", href: "/reports", icon: FileText },
   { label: "Notifications", href: "/notifications", icon: Bell },
   { label: "Settings", href: "/settings", icon: Settings },
+  { label: "Status Page", href: "/status", icon: ShieldCheck },
+  { label: "SLA Reports", href: "/analytics?tab=sla", icon: BarChart3 },
 ]
 
 export function Sidebar({

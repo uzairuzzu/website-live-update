@@ -53,20 +53,25 @@ model VerificationToken {
 }
 
 model Website {
-  id        String   @id @default(cuid())
-  userId    String
-  name      String
-  url       String
-  status    String   @default("unknown")
-  interval  Int      @default(5)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  checks    WebsiteCheck[]
-  incidents Incident[]
-  ssl       SSL?
-  domain    DomainInfo?
+  id            String          @id @default(cuid())
+  userId        String
+  name          String
+  url           String
+  status        String          @default("unknown")
+  interval      Int             @default(5)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checks        WebsiteCheck[]
+  incidents     Incident[]
+  ssl           SSL?
+  domain        DomainInfo?
   notifications Notification[]
+  webhooks      Webhook[]
+  maintenances  MaintenanceWindow[]
+  keywords      Keyword[]
+  tags          WebsiteTag[]
+  contentHash   String?
 }
 
 model WebsiteCheck {
@@ -121,6 +126,9 @@ model WebsiteCheck {
   xFrameOptions     String?
   contentSecurityPolicy String?
   bodyPreview       String?
+  // Content diff
+  contentHash       String?
+  contentChanged    Boolean?
   // Network
   primaryIp         String?
   ipVersion         String?
@@ -214,4 +222,59 @@ model NotificationSetting {
   enabled Boolean @default(true)
   value   String?
   @@unique([userId, type])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  websiteId String
+  userId    String
+  name      String   @default("Default")
+  url       String
+  type      String   @default("generic") // discord, slack, telegram, generic
+  events    String   @default("down,up") // comma-separated
+  enabled   Boolean  @default(true)
+  secret    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model Tag {
+  id        String      @id @default(cuid())
+  userId    String
+  name      String
+  color     String      @default("#6366f1")
+  createdAt DateTime    @default(now())
+  websites  WebsiteTag[]
+  @@unique([userId, name])
+}
+
+model WebsiteTag {
+  websiteId String
+  tagId     String
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  @@id([websiteId, tagId])
+}
+
+model MaintenanceWindow {
+  id        String   @id @default(cuid())
+  websiteId String
+  startsAt  DateTime
+  endsAt    DateTime
+  message   String?
+  createdAt DateTime @default(now())
+  website   Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model Keyword {
+  id          String   @id @default(cuid())
+  websiteId   String
+  keyword     String
+  mode        String   @default("present") // present | absent
+  enabled     Boolean  @default(true)
+  lastMatch   Boolean?
+  lastChecked DateTime?
+  createdAt   DateTime @default(now())
+  website     Website  @relation(fields: [websiteId], references: [id], onDelete: Cascade)
 }

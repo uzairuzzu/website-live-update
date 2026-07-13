@@ -4,6 +4,10 @@ import tls from "tls"
 import dns from "dns"
 import { URL } from "url"
 import { prisma } from "@/lib/prisma"
+import crypto from "crypto"
+import { isInMaintenance } from "@/services/maintenance.service"
+import { checkKeywords } from "@/services/keyword.service"
+import { sendWebhook } from "@/services/webhook.service"
 
 interface CheckContext {
   timings: {
@@ -312,39 +316,99 @@ async function getFullCertChain(hostname: string, port = 443): Promise<any> {
   })
 }
 
+function normalizeUrl(raw: string): string {
+  let url = raw.trim()
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url
+  // Remove trailing slash for consistency
+  url = url.replace(/\/+$/, "")
+  return url
+}
+
+function simplePing(url: string): Promise<{ ok: boolean; time: number; code: number } | null> {
+  return new Promise((resolve) => {
+    const start = Date.now()
+    const mod = url.startsWith("https") ? https : http
+    const req = mod.get(url, { timeout: 15000, rejectUnauthorized: false }, (res) => {
+      const time = Date.now() - start
+      res.resume()
+      resolve({ ok: res.statusCode !== undefined, time, code: res.statusCode || 0 })
+    })
+    req.on("error", () => resolve(null))
+    req.on("timeout", () => { req.destroy(); resolve(null) })
+  })
+}
+
 export async function performCheck(websiteId: string) {
   const website = await prisma.website.findUnique({ where: { id: websiteId } })
   if (!website) return
 
-  const url = website.url
-  const parsed = new URL(url)
+  const rawUrl = website.url
+  const url = normalizeUrl(rawUrl)
 
-  // Parallel DNS + HTTP check
-  const [dnsRecords, httpResult] = await Promise.all([
-    resolveAllDns(parsed.hostname).catch(() => ({})),
-    performDetailedHttpRequest(url).catch(() => null),
-  ])
+  let parsed: URL
+  try { parsed = new URL(url) } catch {
+    const errMsg = `Invalid URL: ${rawUrl}`
+    await prisma.websiteCheck.create({
+      data: { websiteId, status: "offline", errorMessage: errMsg },
+    })
+    await prisma.website.update({ where: { id: websiteId }, data: { status: "offline" } })
+    return null
+  }
+
+  // Phase 1: Full detailed check
+  let httpResult = await performDetailedHttpRequest(url).catch(() => null)
+
+  // Phase 2: If detailed check fails, try simple ping fallback
+  if (!httpResult) {
+    const ping = await simplePing(url)
+    if (ping) {
+      httpResult = {
+        timings: { dns: 0, tcp: 0, tls: 0, ttfb: ping.time, download: 0 },
+        dnsRecords: {} as any, resolvedIps: [], httpVersion: "", method: "GET",
+        statusCode: ping.code, statusMessage: "", responseHeaders: {},
+        requestHeaders: {}, body: "", redirectChain: [], finalUrl: url,
+        primaryIp: "", ipVersion: "", cookies: {}, errorMessage: null,
+      }
+    } else {
+      // Phase 3: Also try with http:// if https failed
+      if (url.startsWith("https://")) {
+        const httpUrl = "http://" + url.slice(8)
+        const altPing = await simplePing(httpUrl)
+        if (altPing) {
+          httpResult = {
+            timings: { dns: 0, tcp: 0, tls: 0, ttfb: altPing.time, download: 0 },
+            dnsRecords: {} as any, resolvedIps: [], httpVersion: "", method: "GET",
+            statusCode: altPing.code, statusMessage: "", responseHeaders: {},
+            requestHeaders: {}, body: "", redirectChain: [], finalUrl: httpUrl,
+            primaryIp: "", ipVersion: "", cookies: {}, errorMessage: null,
+          }
+        }
+      }
+    }
+  }
 
   if (!httpResult) {
+    const errMsg = `Cannot reach ${url} — site may be down or blocking our checks`
     await prisma.websiteCheck.create({
-      data: { websiteId, status: "offline", errorMessage: "Failed to establish connection" },
+      data: { websiteId, status: "offline", errorMessage: errMsg },
     })
     await prisma.website.update({ where: { id: websiteId }, data: { status: "offline" } })
     return null
   }
 
   const status = httpResult.statusCode >= 200 && httpResult.statusCode < 500 ? "online" : "offline"
-  const totalTime = httpResult.timings.dns + httpResult.timings.ttfb + httpResult.timings.download
+  const totalTime = httpResult.timings.dns + httpResult.timings.ttfb + httpResult.timings.download || httpResult.timings.ttfb
   const pageMeta = extractPageMeta(httpResult.body)
   const securityHeaders = analyzeSecurityHeaders(httpResult.responseHeaders)
   const compression = httpResult.responseHeaders["content-encoding"] || null
-
-  // Determine charset
   const ct = httpResult.responseHeaders["content-type"] || ""
   const charsetMatch = ct.match(/charset=([^;\s]+)/i)
   const charset = charsetMatch ? charsetMatch[1] : null
 
-  // Create check record
+  // Content hash for change detection
+  const contentHash = httpResult.body ? crypto.createHash("md5").update(httpResult.body).digest("hex") : null
+  const contentChanged = website.contentHash && contentHash ? website.contentHash !== contentHash : null
+
   await prisma.websiteCheck.create({
     data: {
       websiteId,
@@ -364,41 +428,46 @@ export async function performCheck(websiteId: string) {
       contentLength: httpResult.responseHeaders["content-length"]
         ? parseInt(httpResult.responseHeaders["content-length"]) : null,
       contentEncoding: httpResult.responseHeaders["content-encoding"] || null,
-      charset,
-      compression,
+      charset, compression,
       server: httpResult.responseHeaders["server"] || null,
       poweredBy: httpResult.responseHeaders["x-powered-by"] || null,
       redirectCount: httpResult.redirectChain.length || null,
       redirectChain: httpResult.redirectChain.length > 0 ? httpResult.redirectChain.join(" → ") : null,
       finalUrl: httpResult.finalUrl || null,
       resolvedIps: httpResult.resolvedIps.length > 0 ? JSON.stringify(httpResult.resolvedIps) : null,
-      dnsRecords: dnsRecords ? JSON.stringify(dnsRecords) : null,
+      dnsRecords: httpResult.dnsRecords && Object.keys(httpResult.dnsRecords).length
+        ? JSON.stringify(httpResult.dnsRecords) : null,
       requestHeaders: httpResult.requestHeaders ? JSON.stringify(httpResult.requestHeaders) : null,
       responseHeaders: httpResult.responseHeaders ? JSON.stringify(httpResult.responseHeaders) : null,
       securityHeaders: JSON.stringify(securityHeaders),
       cookies: Object.keys(httpResult.cookies).length > 0 ? JSON.stringify(httpResult.cookies) : null,
       corsHeaders: JSON.stringify(securityHeaders.cors),
-      pageTitle: pageMeta.title,
-      metaDescription: pageMeta.description,
-      metaKeywords: pageMeta.keywords,
-      canonicalUrl: pageMeta.canonical,
-      ogTitle: pageMeta.ogTitle,
-      ogDescription: pageMeta.ogDescription,
-      ogImage: pageMeta.ogImage,
-      robotsTag: pageMeta.robots,
-      faviconUrl: pageMeta.favicon,
+      pageTitle: pageMeta.title, metaDescription: pageMeta.description,
+      metaKeywords: pageMeta.keywords, canonicalUrl: pageMeta.canonical,
+      ogTitle: pageMeta.ogTitle, ogDescription: pageMeta.ogDescription,
+      ogImage: pageMeta.ogImage, robotsTag: pageMeta.robots, faviconUrl: pageMeta.favicon,
       hsts: securityHeaders.hsts?.present || false,
       xFrameOptions: securityHeaders.xFrameOptions,
       contentSecurityPolicy: securityHeaders.csp?.value || null,
       bodyPreview: httpResult.body.slice(0, 3000) || null,
       primaryIp: httpResult.primaryIp || null,
       ipVersion: httpResult.ipVersion || null,
+      contentHash,
+      contentChanged: contentChanged ?? null,
     },
   })
 
+  // Update content hash on website
+  if (contentHash) {
+    await prisma.website.update({ where: { id: websiteId }, data: { contentHash } })
+  }
+
+  // Check if in maintenance window
+  const inMaintenance = await isInMaintenance(websiteId)
+
   // Incident detection
   const previousStatus = website.status
-  if (status === "offline" && previousStatus === "online") {
+  if (status === "offline" && previousStatus === "online" && !inMaintenance) {
     await prisma.incident.create({ data: { websiteId, startedAt: new Date(), resolved: false } })
   }
   if (status === "online" && previousStatus === "offline") {
@@ -412,6 +481,42 @@ export async function performCheck(websiteId: string) {
   }
 
   await prisma.website.update({ where: { id: websiteId }, data: { status } })
+
+  // Keyword checking
+  if (httpResult.body) {
+    const keywordAlerts = await checkKeywords(websiteId, httpResult.body).catch(() => [])
+    for (const msg of keywordAlerts) {
+      await prisma.notification.create({
+        data: { websiteId, type: "keyword_alert", message: msg },
+      })
+    }
+  }
+
+  // Content change alert
+  if (contentChanged) {
+    await prisma.notification.create({
+      data: { websiteId, type: "content_change", message: "Website content has changed" },
+    })
+  }
+
+  // Send webhooks on status change
+  if (previousStatus !== status && !inMaintenance) {
+    const webhooks = await prisma.webhook.findMany({
+      where: { websiteId, enabled: true },
+    })
+    const event = status === "offline" ? "down" : "up"
+    for (const wh of webhooks) {
+      if (wh.events.split(",").map(e => e.trim()).includes(event)) {
+        sendWebhook(wh, event, {
+          websiteName: website.name,
+          websiteUrl: website.url,
+          statusCode: httpResult.statusCode,
+          responseTime: totalTime,
+          errorMessage: httpResult.errorMessage || undefined,
+        }).catch(() => {})
+      }
+    }
+  }
 
   return {
     status, statusCode: httpResult.statusCode, responseTime: totalTime,

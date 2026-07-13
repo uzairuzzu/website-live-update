@@ -128,6 +128,211 @@ function HeadersTable({ headers }: { headers: string | null }) {
   )
 }
 
+function TagsSection({ websiteId }: { websiteId: string }) {
+  const [tags, setTags] = useState<{ id: string; name: string; color: string }[]>([])
+  const [allTags, setAllTags] = useState<{ id: string; name: string; color: string }[]>([])
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/tags").then(r => r.json()).then(setAllTags)
+    fetch(`/api/websites/${websiteId}/tags`).then(r => r.json()).then(setTags)
+  }, [])
+
+  async function toggleTag(tagId: string) {
+    const current = tags.map(t => t.id)
+    const next = current.includes(tagId) ? current.filter(id => id !== tagId) : [...current, tagId]
+    const res = await fetch(`/api/websites/${websiteId}/tags`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tagIds: next }),
+    })
+    if (res.ok) {
+      fetch(`/api/websites/${websiteId}/tags`).then(r => r.json()).then(setTags)
+      toast.success("Tags updated")
+    }
+  }
+
+  return (
+    <Section title="Tags" icon={Tag} defaultOpen={false}>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {tags.map(t => (
+          <span key={t.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: t.color + "20", color: t.color }}>
+            {t.name}
+            <button onClick={() => toggleTag(t.id)} className="hover:opacity-70">&times;</button>
+          </span>
+        ))}
+        {tags.length === 0 && <span className="text-xs text-[var(--muted-foreground)]">No tags assigned</span>}
+      </div>
+      <button onClick={() => setOpen(!open)} className="text-xs text-[var(--primary)] hover:underline">
+        {open ? "Hide tags" : "Manage tags"}
+      </button>
+      {open && (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {allTags.map(t => {
+            const active = tags.some(tg => tg.id === t.id)
+            return (
+              <button key={t.id} onClick={() => toggleTag(t.id)}
+                className={`px-2 py-1 rounded-full text-xs font-medium transition-colors border ${
+                  active ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]" : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--primary)]"
+                }`}
+              >
+                {t.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function KeywordsSection({ websiteId }: { websiteId: string }) {
+  const [keywords, setKeywords] = useState<{ id: string; keyword: string; mode: string; enabled: boolean; lastMatch?: boolean }[]>([])
+  const [newKw, setNewKw] = useState("")
+  const [newMode, setNewMode] = useState("present")
+
+  useEffect(() => { fetch(`/api/keywords?websiteId=${websiteId}`).then(r => r.json()).then(setKeywords) }, [])
+
+  async function addKeyword() {
+    if (!newKw.trim()) return
+    const res = await fetch("/api/keywords", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ websiteId, keyword: newKw.trim(), mode: newMode }),
+    })
+    if (res.ok) { setNewKw(""); fetch(`/api/keywords?websiteId=${websiteId}`).then(r => r.json()).then(setKeywords); toast.success("Keyword added") }
+  }
+
+  async function removeKeyword(id: string) {
+    await fetch(`/api/keywords/${id}`, { method: "DELETE" })
+    setKeywords(k => k.filter(x => x.id !== id))
+  }
+
+  async function toggleKeyword(kw: typeof keywords[0]) {
+    const res = await fetch(`/api/keywords/${kw.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !kw.enabled }),
+    })
+    if (res.ok) fetch(`/api/keywords?websiteId=${websiteId}`).then(r => r.json()).then(setKeywords)
+  }
+
+  return (
+    <Section title="Keyword Monitoring" icon={Search} defaultOpen={false}>
+      <div className="flex items-center gap-2 mb-3">
+        <input value={newKw} onChange={e => setNewKw(e.target.value)} placeholder="e.g. pricing" className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm" onKeyDown={e => e.key === "Enter" && addKeyword()} />
+        <select value={newMode} onChange={e => setNewMode(e.target.value)} className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm">
+          <option value="present">Should exist</option>
+          <option value="absent">Should NOT exist</option>
+        </select>
+        <button onClick={addKeyword} className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-sm font-medium hover:opacity-90">Add</button>
+      </div>
+      {keywords.length === 0 ? <p className="text-xs text-[var(--muted-foreground)]">No keywords configured</p> : (
+        <div className="space-y-1.5">{keywords.map(kw => (
+          <div key={kw.id} className="flex items-center justify-between p-2 rounded-lg border border-[var(--border)]">
+            <div className="flex items-center gap-2">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--secondary)]">{kw.mode}</span>
+              <span className="text-sm font-mono">{kw.keyword}</span>
+              {kw.lastMatch !== null && <span className={`text-xs ${kw.lastMatch ? "text-green-500" : "text-red-500"}`}>{kw.lastMatch ? "✓" : "✗"}</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => toggleKeyword(kw)} className={`px-2 py-0.5 text-xs rounded ${kw.enabled ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" : "bg-gray-100 text-gray-500"}`}>{kw.enabled ? "On" : "Off"}</button>
+              <button onClick={() => removeKeyword(kw.id)} className="text-red-500 hover:text-red-700 text-xs">Remove</button>
+            </div>
+          </div>
+        ))}</div>
+      )}
+    </Section>
+  )
+}
+
+function MaintenanceSection({ websiteId }: { websiteId: string }) {
+  const [windows, setWindows] = useState<{ id: string; startsAt: string; endsAt: string; message: string | null }[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ startsAt: "", endsAt: "", message: "" })
+
+  useEffect(() => { fetch(`/api/maintenance?websiteId=${websiteId}`).then(r => r.json()).then(setWindows) }, [])
+
+  async function addWindow() {
+    if (!form.startsAt || !form.endsAt) return
+    const res = await fetch("/api/maintenance", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ websiteId, ...form }),
+    })
+    if (res.ok) { setForm({ startsAt: "", endsAt: "", message: "" }); setShowForm(false); fetch(`/api/maintenance?websiteId=${websiteId}`).then(r => r.json()).then(setWindows); toast.success("Maintenance scheduled") }
+  }
+
+  async function removeWindow(id: string) {
+    await fetch(`/api/maintenance/${id}`, { method: "DELETE" })
+    setWindows(w => w.filter(x => x.id !== id))
+  }
+
+  const now = new Date()
+
+  return (
+    <Section title="Maintenance Windows" icon={Clock} defaultOpen={false}>
+      <div className="space-y-2 mb-3">
+        {windows.length === 0 ? <p className="text-xs text-[var(--muted-foreground)]">No maintenance windows scheduled</p> : windows.map(w => {
+          const active = new Date(w.startsAt) <= now && new Date(w.endsAt) >= now
+          return (
+            <div key={w.id} className={`flex items-center justify-between p-3 rounded-lg border ${active ? "border-yellow-400 bg-yellow-50 dark:bg-yellow-950" : "border-[var(--border)]"}`}>
+              <div>
+                <div className="flex items-center gap-2">
+                  {active && <span className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />}
+                  <span className="text-sm font-medium">{new Date(w.startsAt).toLocaleString()} → {new Date(w.endsAt).toLocaleString()}</span>
+                </div>
+                {w.message && <p className="text-xs text-[var(--muted-foreground)] mt-0.5">{w.message}</p>}
+              </div>
+              <button onClick={() => removeWindow(w.id)} className="text-red-500 hover:text-red-700 text-xs">Cancel</button>
+            </div>
+          )
+        })}
+      </div>
+      <button onClick={() => setShowForm(!showForm)} className="text-xs text-[var(--primary)] hover:underline">{showForm ? "Cancel" : "Schedule maintenance"}</button>
+      {showForm && (
+        <div className="mt-3 space-y-3 p-3 rounded-lg border border-[var(--border)]">
+          <div>
+            <label className="block text-xs font-medium mb-1">Starts At</label>
+            <input type="datetime-local" value={form.startsAt} onChange={e => setForm({ ...form, startsAt: e.target.value })} className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">Ends At</label>
+            <input type="datetime-local" value={form.endsAt} onChange={e => setForm({ ...form, endsAt: e.target.value })} className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">Message (optional)</label>
+            <input value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Scheduled maintenance" className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm" />
+          </div>
+          <button onClick={addWindow} className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-medium">Schedule</button>
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function WebhooksSection({ websiteId, websiteName, websiteUrl }: { websiteId: string; websiteName: string; websiteUrl: string }) {
+  const [webhooks, setWebhooks] = useState<{ id: string; name: string; url: string; type: string; events: string; enabled: boolean }[]>([])
+
+  useEffect(() => { fetch(`/api/webhooks?websiteId=${websiteId}`).then(r => r.json()).then(setWebhooks) }, [])
+
+  return (
+    <Section title="Webhooks" icon={Bell} defaultOpen={false}>
+      {webhooks.length === 0 ? <p className="text-xs text-[var(--muted-foreground)]">No webhooks configured. Go to <a href="/settings" className="text-[var(--primary)] hover:underline">Settings → Webhooks</a> to add one.</p> : (
+        <div className="space-y-2">{webhooks.map(w => (
+          <div key={w.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)]">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--secondary)]">{w.type}</span>
+                <span className="text-sm font-medium">{w.name}</span>
+              </div>
+              <p className="text-xs text-[var(--muted-foreground)] truncate max-w-[300px]">{w.url}</p>
+              <p className="text-xs text-[var(--muted-foreground)]">Events: {w.events}</p>
+            </div>
+            <span className={`px-2 py-0.5 text-xs rounded ${w.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>{w.enabled ? "Active" : "Disabled"}</span>
+          </div>
+        ))}</div>
+      )}
+    </Section>
+  )
+}
+
 export default function WebsiteDetailsPage() {
   const params = useParams()
   const [website, setWebsite] = useState<any>(null)
@@ -484,6 +689,18 @@ export default function WebsiteDetailsPage() {
         </CardHeader>
         <ResponseTimeChart data={allChecks.filter(c => c.responseTime).map(c => ({ date: c.checkedAt, time: c.responseTime! }))} />
       </Card>
+
+      {/* TAGS */}
+      <TagsSection websiteId={website.id} />
+
+      {/* KEYWORDS */}
+      <KeywordsSection websiteId={website.id} />
+
+      {/* MAINTENANCE */}
+      <MaintenanceSection websiteId={website.id} />
+
+      {/* WEBHOOKS */}
+      <WebhooksSection websiteId={website.id} websiteName={website.name} websiteUrl={website.url} />
 
       {/* INCIDENTS */}
       {website.incidents?.length > 0 ? (

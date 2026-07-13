@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 
 interface BadgeProps {
-  variant?: "online" | "offline" | "warning" | "default"
+  variant?: "online" | "offline" | "warning" | "default" | "secondary"
   children: React.ReactNode
   className?: string
 }
@@ -19,7 +19,7 @@ export function Badge({ variant = "default", children, className }: BadgeProps) 
           "bg-amber-500/10 text-amber-600 dark:text-amber-400":
             variant === "warning",
           "bg-[var(--secondary)] text-[var(--secondary-foreground)]":
-            variant === "default",
+            variant === "default" || variant === "secondary",
         },
         className
       )}
