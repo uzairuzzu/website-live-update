@@ -23,8 +23,8 @@ export async function deleteWebhook(id: string) {
 
 function formatPayload(webhook: { type: string; name: string; url: string }, event: string, data: any) {
   const color = event === "down" ? 15548997 : event === "up" ? 5763719 : 15844367
-  const emoji = event === "down" ? "🔴" : event === "up" ? "🟢" : "⚠️"
-  const title = `${emoji} ${data.websiteName} — ${event.toUpperCase()}`
+  const emoji = event === "down" ? "\u{1F534}" : event === "up" ? "\u{1F7E2}" : "\u26A0\uFE0F"
+  const title = `${emoji} ${data.websiteName} \u2014 ${event.toUpperCase()}`
 
   const fields = [
     { name: "Website", value: data.websiteUrl, inline: true },
@@ -50,7 +50,21 @@ function formatPayload(webhook: { type: string; name: string; url: string }, eve
       return { chat_id: "@placeholder", text: msg, parse_mode: "Markdown" }
     }
     default:
-      return { event, website: data.websiteName, url: data.websiteUrl, statusCode: data.statusCode, responseTime: data.responseTime, errorMessage: data.errorMessage }
+      return { event, website: data.websiteName, url: data.websiteUrl, statusCode: data.statusCode,
+               responseTime: data.responseTime, errorMessage: data.errorMessage }
+  }
+}
+
+async function deliverOnce(webhookUrl: string, payload: any, headers: Record<string, string>): Promise<{ ok: boolean; status: number; body: string }> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    const res = await fetch(webhookUrl, { method: "POST", headers, body: JSON.stringify(payload), signal: controller.signal })
+    clearTimeout(timeout)
+    const body = await res.text().catch(() => "")
+    return { ok: res.ok, status: res.status, body: body.slice(0, 500) }
+  } catch (err: any) {
+    return { ok: false, status: 0, body: err.message || "Network error" }
   }
 }
 
@@ -66,8 +80,83 @@ export async function sendWebhook(webhook: {
     headers["X-Webhook-Signature"] = sig
   }
 
-  try {
-    const res = await fetch(webhook.url, { method: "POST", headers, body: JSON.stringify(payload) })
-    return res.ok
-  } catch { return false }
+  const delivery = await prisma.webhookDelivery.create({
+    data: { webhookId: webhook.id, event, payload: JSON.stringify(payload), status: "pending" },
+  })
+
+  const result = await deliverOnce(webhook.url, payload, headers)
+
+  if (result.ok) {
+    await prisma.webhookDelivery.update({
+      where: { id: delivery.id },
+      data: { status: "delivered", statusCode: result.status, response: result.body, attempts: 1, deliveredAt: new Date() },
+    })
+    return true
+  }
+
+  await prisma.webhookDelivery.update({
+    where: { id: delivery.id },
+    data: { status: "failed", statusCode: result.status, response: result.body, attempts: 1 },
+  })
+
+  scheduleRetry(delivery.id, 1, webhook, payload, headers)
+  return false
+}
+
+async function scheduleRetry(deliveryId: string, attempt: number, webhook: { id: string; url: string; type: string; secret: string | null; name: string }, payload: any, headers: Record<string, string>) {
+  const maxAttempts = 5
+  if (attempt >= maxAttempts) {
+    await prisma.webhookDelivery.update({ where: { id: deliveryId }, data: { status: "dead" } })
+    return
+  }
+
+  const delayMs = Math.min(60000, 2000 * Math.pow(2, attempt - 1))
+  const nextRetry = new Date(Date.now() + delayMs)
+
+  await prisma.webhookDelivery.update({
+    where: { id: deliveryId },
+    data: { nextRetryAt: nextRetry, attempts: attempt },
+  })
+
+  setTimeout(async () => {
+    const result = await deliverOnce(webhook.url, payload, headers)
+    if (result.ok) {
+      await prisma.webhookDelivery.update({
+        where: { id: deliveryId },
+        data: { status: "delivered", statusCode: result.status, response: result.body, attempts: attempt + 1, deliveredAt: new Date() },
+      })
+    } else {
+      await prisma.webhookDelivery.update({
+        where: { id: deliveryId },
+        data: { status: result.status === 0 ? "retrying" : "failed", statusCode: result.status, response: result.body, attempts: attempt + 1 },
+      })
+      scheduleRetry(deliveryId, attempt + 1, webhook, payload, headers)
+    }
+  }, delayMs)
+}
+
+export async function getWebhookDeliveries(webhookId: string, limit = 20) {
+  return prisma.webhookDelivery.findMany({
+    where: { webhookId },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { id: true, event: true, status: true, statusCode: true, attempts: true, createdAt: true, deliveredAt: true, response: true },
+  })
+}
+
+export async function retryDelivery(deliveryId: string) {
+  const delivery = await prisma.webhookDelivery.findUnique({ where: { id: deliveryId }, include: { webhook: true } })
+  if (!delivery || !delivery.webhook) return false
+
+  const webhook = delivery.webhook
+  const payload = JSON.parse(delivery.payload)
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (webhook.secret) {
+    const sig = crypto.createHmac("sha256", webhook.secret).update(JSON.stringify(payload)).digest("hex")
+    headers["X-Webhook-Signature"] = sig
+  }
+
+  await prisma.webhookDelivery.update({ where: { id: deliveryId }, data: { status: "retrying", attempts: 0 } })
+  scheduleRetry(deliveryId, 0, webhook, payload, headers)
+  return true
 }

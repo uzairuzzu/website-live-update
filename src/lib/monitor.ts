@@ -37,6 +37,11 @@ const REGIONS = [
   { id: "ap-south", name: "Asia Pacific" },
 ]
 
+function stripNullBytes(val: string | null | undefined): string | null {
+  if (val == null) return null
+  return val.replace(/\x00/g, "")
+}
+
 function parseCookies(headers: Record<string, string>): Record<string, string> {
   const cookies: Record<string, string> = {}
   const setCookie = headers["set-cookie"]
@@ -604,6 +609,7 @@ export async function performCheck(websiteId: string) {
   }
 
   if (monitorType === "http" && httpResult) {
+    httpResult.body = stripNullBytes(httpResult.body) || ""
     const pageMeta = extractPageMeta(httpResult.body)
     const securityHeaders = analyzeSecurityHeaders(httpResult.responseHeaders)
     const compression = httpResult.responseHeaders["content-encoding"] || null
@@ -615,7 +621,7 @@ export async function performCheck(websiteId: string) {
 
     await prisma.websiteCheck.create({
       data: {
-        websiteId, status: effectiveStatus, statusCode, statusMessage: httpResult.statusMessage || null,
+        websiteId, status: effectiveStatus, statusCode, statusMessage: stripNullBytes(httpResult.statusMessage),
         responseTime, errorMessage,
         dnsTime: httpResult.timings.dns || null, tcpTime: httpResult.timings.tcp || null,
         tlsTime: httpResult.timings.tls || null, ttfb: httpResult.timings.ttfb || null,
@@ -624,11 +630,11 @@ export async function performCheck(websiteId: string) {
         contentType: ct || null,
         contentLength: httpResult.responseHeaders["content-length"] ? parseInt(httpResult.responseHeaders["content-length"]) : null,
         contentEncoding: httpResult.responseHeaders["content-encoding"] || null,
-        charset, compression, server: httpResult.responseHeaders["server"] || null,
-        poweredBy: httpResult.responseHeaders["x-powered-by"] || null,
+        charset, compression, server: stripNullBytes(httpResult.responseHeaders["server"]),
+        poweredBy: stripNullBytes(httpResult.responseHeaders["x-powered-by"]),
         redirectCount: httpResult.redirectChain.length || null,
-        redirectChain: httpResult.redirectChain.length > 0 ? httpResult.redirectChain.join(" → ") : null,
-        finalUrl: httpResult.finalUrl || null,
+        redirectChain: httpResult.redirectChain.length > 0 ? stripNullBytes(httpResult.redirectChain.join(" → ")) : null,
+        finalUrl: stripNullBytes(httpResult.finalUrl),
         resolvedIps: httpResult.resolvedIps.length > 0 ? JSON.stringify(httpResult.resolvedIps) : null,
         dnsRecords: httpResult.dnsRecords && Object.keys(httpResult.dnsRecords).length ? JSON.stringify(httpResult.dnsRecords) : null,
         requestHeaders: httpResult.requestHeaders ? JSON.stringify(httpResult.requestHeaders) : null,
@@ -636,15 +642,15 @@ export async function performCheck(websiteId: string) {
         securityHeaders: JSON.stringify(securityHeaders),
         cookies: Object.keys(httpResult.cookies).length > 0 ? JSON.stringify(httpResult.cookies) : null,
         corsHeaders: JSON.stringify(securityHeaders.cors),
-        pageTitle: pageMeta.title, metaDescription: pageMeta.description,
-        metaKeywords: pageMeta.keywords, canonicalUrl: pageMeta.canonical,
-        ogTitle: pageMeta.ogTitle, ogDescription: pageMeta.ogDescription,
-        ogImage: pageMeta.ogImage, robotsTag: pageMeta.robots, faviconUrl: pageMeta.favicon,
+        pageTitle: stripNullBytes(pageMeta.title), metaDescription: stripNullBytes(pageMeta.description),
+        metaKeywords: stripNullBytes(pageMeta.keywords), canonicalUrl: stripNullBytes(pageMeta.canonical),
+        ogTitle: stripNullBytes(pageMeta.ogTitle), ogDescription: stripNullBytes(pageMeta.ogDescription),
+        ogImage: stripNullBytes(pageMeta.ogImage), robotsTag: stripNullBytes(pageMeta.robots), faviconUrl: stripNullBytes(pageMeta.favicon),
         hsts: securityHeaders.hsts?.present || false,
-        xFrameOptions: securityHeaders.xFrameOptions,
-        contentSecurityPolicy: securityHeaders.csp?.value || null,
-        bodyPreview: httpResult.body.slice(0, 3000) || null,
-        primaryIp: httpResult.primaryIp || null, ipVersion: httpResult.ipVersion || null,
+        xFrameOptions: stripNullBytes(securityHeaders.xFrameOptions),
+        contentSecurityPolicy: stripNullBytes(securityHeaders.csp?.value),
+        bodyPreview: stripNullBytes(httpResult.body.slice(0, 3000)) || null,
+        primaryIp: stripNullBytes(httpResult.primaryIp), ipVersion: stripNullBytes(httpResult.ipVersion),
         contentHash, contentChanged: contentChanged ?? null,
         isAnomaly, anomalyDeviation: anomalyDeviation || null,
       },
